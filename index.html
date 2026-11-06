@@ -137,7 +137,7 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
 
       var b=el("div","body"),h=el("h3");
       if(r.file_id){
-        var fid=el("span","cat","ID: "+r.file_id);
+        var fid=el("span","cat","ID: "+r.file_id+" - ");
         h.appendChild(fid);
         h.appendChild(document.createTextNode(" "));
       }
@@ -167,7 +167,7 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
   function openForm(r){
     editing=r||null;$("f-file").value="";
     $("f-title").value=r?r.title||"":"";
-    $("f-file-id.value")||($("f-file-id").value=r?r.file_id||"":"");
+    $("f-file-id").value=r?r.file_id||"":"";
     $("f-desc").value=r?r.description||"":"";
     $("f-hint").textContent=r?"اختر ملفًا جديدًا فقط لو عايز تستبدل الحالي ("+(r.file_Name||"")+").":"PDF أو صور، حتى 20 ميجابايت.";
     $("form").classList.add("on");$("f-title").focus();
@@ -193,7 +193,9 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
       var fileName = editing ? editing.file_Name : null;
 
       if(f){
-        var filePath = Date.now() + '_' + f.name;
+        // تنظيف اسم الملف من الفواصل العليا والرموز غير المسموحة والمسافات
+        const cleanFileName = f.name.replace(/['"]/g, "").replace(/\s+/g, "_");
+        var filePath = Date.now() + '_' + cleanFileName;
         var { error: uploadError } = await supabase.storage.from('assets').upload(filePath, f);
         if(uploadError) throw uploadError;
         assetId = filePath;
