@@ -74,7 +74,6 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function(){
-  // إعدادات الاتصال بـ Supabase
   const SUPABASE_URL = 'https://mdpygeqamujlfynebywu.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_KpMHS25xwWbUXjXCOw4MXg_HmnVTJtK';
   const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -109,7 +108,6 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
   }
   function isImg(r){return (r.content_type||"").indexOf("image/")===0}
 
-  // جلب البيانات من Supabase
   async function loadRecords(){
     var { data, error } = await supabase.from('records').select('*').order('ts', { ascending: false });
     if(error){ flash("خطأ في تحميل البيانات: " + error.message); return; }
@@ -180,8 +178,9 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
   };
 
   async function save(){
-    var f=$("f-file").files[0], title=$("f-title").value.trim(), btn=$("save");
-    if(!title){$("f-title").focus();return}
+    var f=$("f-file").files[0], title=$("f-title.value")||$("f-title").value.trim(), btn=$("save");
+    var titleVal = $("f-title").value.trim();
+    if(!titleVal){$("f-title").focus();return}
     if(!editing&&!f){flash("اختر ملفًا أولًا.");return}
     if(f&&f.size>MAX){flash("الملف أكبر من 20 ميجابايت.");return}
     btn.disabled=true;btn.textContent="جاري الحفظ…";
@@ -193,8 +192,8 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
       var fileName = editing ? editing.file_Name : null;
 
       if(f){
-        // تنظيف اسم الملف من الفواصل العليا والرموز غير المسموحة والمسافات
-        const cleanFileName = f.name.replace(/['"]/g, "").replace(/\s+/g, "_");
+        // تنظيف شامل: إزالة أي رموز خاصة، فواصل عليا، مسافات، وتحويل الرموز غير الإنجليزية لشرطات سفلية
+        var cleanFileName = f.name.replace(/[^a-zA-Z0-9._-]/g, "_");
         var filePath = Date.now() + '_' + cleanFileName;
         var { error: uploadError } = await supabase.storage.from('assets').upload(filePath, f);
         if(uploadError) throw uploadError;
@@ -205,14 +204,14 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
       }
 
       var recordData = {
-        title: title,
+        title: titleVal,
         file_id: $("f-file-id").value.trim(),
         description: $("f-desc").value.trim(),
         asset_id: assetId,
         file_Name: fileName,
         content_type: contentType,
         size: sizeBytes,
-        ts: Date.now()
+            ts: Date.now()
       };
 
       if(editing){
@@ -249,7 +248,6 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
   $("cancel").onclick=closeForm;$("save").onclick=save;
   $("q").oninput=render;
 
-  // التشغيل الأولي
   loadRecords();
 })();
 </script>
