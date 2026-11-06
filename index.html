@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>أرشيف المستندات</title>
+<style>
+:root{--bg:#f5f7f8;--card:#fff;--tx:#1a1f24;--mu:#66707c;--ac:#0f766e;--acx:#fff;--bd:#e0e5ea;--dn:#b42318;--hl:#fff2a8;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121518;--card:#1b2024;--tx:#e8ecef;--mu:#98a2ad;--ac:#2dd4bf;--acx:#06201c;--bd:#2c343b;--dn:#f97066;--hl:#5c4d00;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#121518;--card:#1b2024;--tx:#e8ecef;--mu:#98a2ad;--ac:#2dd4bf;--acx:#06201c;--bd:#2c343b;--dn:#f97066;--hl:#5c4d00;color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:"Segoe UI",Tahoma,"Noto Naskh Arabic",Arial,sans-serif;line-height:1.6}
+.wrap{max-width:860px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:1.5rem;margin:0 0 4px}
+.sub{color:var(--mu);margin:0 0 18px;font-size:.95rem}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+input,select,textarea,button{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px 12px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--ac)}
+#q{flex:1 1 220px;font-size:1.05rem}
+button{cursor:pointer}
+button.pri{background:var(--ac);color:var(--acx);border-color:var(--ac);font-weight:600}
+button:disabled{opacity:.6;cursor:wait}
+button.lnk{border:none;background:none;padding:4px 8px;color:var(--mu);font-size:.85rem}
+button.lnk.dn{color:var(--dn)}
+.meta{color:var(--mu);font-size:.85rem;margin:6px 2px 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px 14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start}
+.thumb{flex:0 0 64px;height:64px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;color:var(--ac);overflow:hidden}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.body{flex:1;min-width:0}
+.card h3{margin:0;font-size:1.05rem;word-break:break-word}
+.card h3 a{color:var(--tx);text-decoration:none}
+.card h3 a:hover{color:var(--ac);text-decoration:underline}
+.desc{color:var(--mu);font-size:.9rem;margin:4px 0}
+.info{color:var(--mu);font-size:.8rem}
+.acts{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center}
+.open{background:var(--ac);color:var(--acx);text-decoration:none;border-radius:8px;padding:4px 14px;font-size:.88rem;font-weight:600}
+mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
+.form{display:none;margin-bottom:16px;flex-direction:column;gap:8px}
+.form.on{display:flex}
+.form .row{display:flex;gap:8px}.form .row>*{flex:1;min-width:0}
+.empty,.note{text-align:center;color:var(--mu);padding:28px 8px}
+.note{background:var(--card);border:1px dashed var(--bd);border-radius:12px;padding:10px;margin-bottom:12px;font-size:.85rem}
+.hint{font-size:.8rem;color:var(--mu)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>أرشيف المستندات</h1>
+  <p class="sub">ابحث عن المستند وافتحه بضغطة واحدة.</p>
+  <div id="note" class="note" hidden></div>
+
+  <div class="bar">
+    <input id="q" type="search" placeholder="ابحث بالاسم أو الوصف أو الـ ID..." autocomplete="off">
+    <button class="pri" id="add">+ رفع ملف</button>
+  </div>
+
+  <div class="card form" id="form">
+    <input id="f-file" type="file" accept="application/pdf,image/*">
+    <div class="hint" id="f-hint">PDF أو صور، حتى 20 ميجابايت.</div>
+    <div class="row">
+      <input id="f-title" placeholder="الاسم *">
+      <input id="f-file-id" placeholder="ID (مثال: 12)">
+    </div>
+    <textarea id="f-desc" placeholder="الوصف"></textarea>
+    <div class="row"><button class="pri" id="save">حفظ</button><button id="cancel">إلغاء</button></div>
+  </div>
+
+  <div class="meta" id="count"></div>
+  <div id="list"></div>
+</div>
+
+<!-- استدعاء مكتبة Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function(){
+  // إعدادات الاتصال بـ Supabase
+  const SUPABASE_URL = 'https://mdpygeqamujlfynebywu.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_KpMHS25xwWbUXjXCOw4MXg_HmnVTJtK';
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  var rows = [], editing = null, armed = null, MAX = 20 * 1024 * 1024;
+  var $ = function(id){ return document.getElementById(id); };
+
+  function norm(s){
+    return String(s||"").toLowerCase().replace(/[\u064B-\u0652\u0640]/g,"")
+      .replace(/[أإآٱ]/g,"ا").replace(/ى/g,"ي").replace(/ة/g,"ه");
+  }
+  function el(tag,cls,txt){var e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e}
+  function hl(parent,text,terms){
+    var n=norm(text),ranges=[];
+    terms.forEach(function(t){var i=0,p;while((p=n.indexOf(t,i))>-1){ranges.push([p,p+t.length]);i=p+t.length}});
+    if(!ranges.length){parent.textContent=text;return}
+    ranges.sort(function(a,b){return a[0]-b[0]});
+    var cur=0;
+    ranges.forEach(function(r){
+      if(r[0]<cur)return;
+      parent.appendChild(document.createTextNode(text.slice(cur,r[0])));
+      var m=el("mark",null,text.slice(r[0],r[1]));parent.appendChild(m);cur=r[1];
+    });
+    parent.appendChild(document.createTextNode(text.slice(cur)));
+  }
+  function size(b){return b>1048576?(b/1048576).toFixed(1)+" م.ب":Math.max(1,Math.round(b/1024))+" ك.ب"}
+  function flash(m){var n=$("note");n.textContent=m;n.hidden=false}
+  
+  function getFileUrl(assetId){
+    var { data } = supabase.storage.from('assets').getPublicUrl(assetId);
+    return data.publicUrl;
+  }
+  function isImg(r){return (r.content_type||"").indexOf("image/")===0}
+
+  // جلب البيانات من Supabase
+  async function loadRecords(){
+    var { data, error } = await supabase.from('records').select('*').order('ts', { ascending: false });
+    if(error){ flash("خطأ في تحميل البيانات: " + error.message); return; }
+    rows = data || [];
+    render();
+  }
+
+  function render(){
+    var terms=norm($("q").value).split(/\s+/).filter(Boolean);
+    var out=rows.filter(function(r){
+      var hay=norm([r.title, r.file_id, r.description, r.file_Name].join(" "));
+      return terms.every(function(t){return hay.indexOf(t)>-1});
+    });
+
+    $("count").textContent=out.length+" من "+rows.length+" ملف";
+    var list=$("list");list.innerHTML="";
+    if(!out.length){list.appendChild(el("div","empty",rows.length?"لا توجد نتائج مطابقة.":"لا توجد ملفات بعد."));return}
+
+    out.forEach(function(r){
+      var c=el("div","card"),th=el("div","thumb");
+      var fileUrl = getFileUrl(r.asset_id);
+      if(isImg(r)){var im=document.createElement("img");im.loading="lazy";im.alt="";im.src=fileUrl;th.appendChild(im)}
+      else th.textContent=(r.content_type==="application/pdf")?"PDF":"ملف";
+      c.appendChild(th);
+
+      var b=el("div","body"),h=el("h3");
+      if(r.file_id){
+        var fid=el("span","cat","ID: "+r.file_id);
+        h.appendChild(fid);
+      }
+      var a=document.createElement("a");
+      a.href=fileUrl;a.target="_blank";a.rel="noopener";hl(a,r.title||"",terms);h.appendChild(a);
+      b.appendChild(h);
+
+      if(r.description){
+        var d=el("div","desc");hl(d,r.description,terms);b.appendChild(d);
+      }
+
+      b.appendChild(el("div","info",size(r.size||0)+" · آخر تحديث "+new Date(r.ts||Date.now()).toLocaleDateString("ar-EG")));
+      
+      var ac=el("div","acts"),op=el("a","open","فتح");op.href=fileUrl;op.target="_blank";op.rel="noopener";ac.appendChild(op);
+      
+      var e=el("button","lnk","تعديل / تحديث الملف");e.onclick=function(){openForm(r)};
+      var x=el("button","lnk dn",armed===r.id?"تأكيد الحذف؟":"حذف");
+      x.onclick=function(){
+        if(armed===r.id){armed=null;remove(r)}
+        else{armed=r.id;render();setTimeout(function(){if(armed===r.id){armed=null;render()}},3000)}
+      };
+      ac.appendChild(e);ac.appendChild(x);
+      b.appendChild(ac);c.appendChild(b);list.appendChild(c);
+    });
+  }
+
+  function openForm(r){
+    editing=r||null;$("f-file").value="";
+    $("f-title").value=r?r.title||"":"";
+    $("f-file-id.value")||($("f-file-id").value=r?r.file_id||"":"");
+    $("f-desc").value=r?r.description||"":"";
+    $("f-hint").textContent=r?"اختر ملفًا جديدًا فقط لو عايز تستبدل الحالي ("+(r.file_Name||"")+").":"PDF أو صور، حتى 20 ميجابايت.";
+    $("form").classList.add("on");$("f-title").focus();
+  }
+  function closeForm(){$("form").classList.remove("on");editing=null}
+
+  $("f-file").onchange=function(){
+    var f=this.files[0];
+    if(f&&!$("f-title").value)$("f-title").value=f.name.replace(/\.[^.]+$/,"");
+  };
+
+  async function save(){
+    var f=$("f-file").files[0], title=$("f-title").value.trim(), btn=$("save");
+    if(!title){$("f-title").focus();return}
+    if(!editing&&!f){flash("اختر ملفًا أولًا.");return}
+    if(f&&f.size>MAX){flash("الملف أكبر من 20 ميجابايت.");return}
+    btn.disabled=true;btn.textContent="جاري الحفظ…";
+
+    try {
+      var assetId = editing ? editing.asset_id : null;
+      var contentType = editing ? editing.content_type : null;
+      var sizeBytes = editing ? editing.size : null;
+      var fileName = editing ? editing.file_Name : null;
+
+      if(f){
+        var filePath = Date.now() + '_' + f.name;
+        var { error: uploadError } = await supabase.storage.from('assets').upload(filePath, f);
+        if(uploadError) throw uploadError;
+        assetId = filePath;
+        contentType = f.type;
+        sizeBytes = f.size;
+        fileName = f.name;
+      }
+
+      var recordData = {
+        title: title,
+        file_id: $("f-file-id").value.trim(),
+        description: $("f-desc").value.trim(),
+        asset_id: assetId,
+        file_Name: fileName,
+        content_type: contentType,
+        size: sizeBytes,
+        ts: Date.now()
+      };
+
+      if(editing){
+        var { error: updateError } = await supabase.from('records').update(recordData).eq('id', editing.id);
+        if(updateError) throw updateError;
+      } else {
+        var { error: insertError } = await supabase.from('records').insert([recordData]);
+        if(insertError) throw insertError;
+      }
+
+      closeForm();
+      loadRecords();
+    } catch(e) {
+      flash("تعذّر الحفظ: "+(e.message||"حاول مرة أخرى"));
+    } finally {
+      btn.disabled=false;btn.textContent="حفظ";
+    }
+  }
+
+  async function remove(r){
+    try {
+      var { error } = await supabase.from('records').delete().eq('id', r.id);
+      if(error) throw error;
+      if(r.asset_id){
+        await supabase.storage.from('assets').remove([r.asset_id]);
+      }
+      loadRecords();
+    } catch(e) {
+      flash("تعذّر الحذف: "+(e.message||""));
+    }
+  }
+
+  $("add").onclick=function(){openForm(null)};
+  $("cancel").onclick=closeForm;$("save").onclick=save;
+  $("q").oninput=render;
+
+  // التشغيل الأولي
+  loadRecords();
+})();
+</script>
+</body>
+</html>
