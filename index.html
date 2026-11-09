@@ -25,7 +25,10 @@ button.lnk{border:none;background:none;padding:4px 8px;color:var(--mu);font-size
 button.lnk.dn{color:var(--dn)}
 .meta{color:var(--mu);font-size:.85rem;margin:6px 2px 12px}
 .card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px 14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start}
+.card.folder{align-items:center;cursor:pointer}
+.card.folder:hover{border-color:var(--ac)}
 .thumb{flex:0 0 64px;height:64px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;color:var(--ac);overflow:hidden}
+.thumb.fo{font-size:2rem}
 .thumb img{width:100%;height:100%;object-fit:cover}
 .body{flex:1;min-width:0}
 .card h3{margin:0;font-size:1.05rem;word-break:break-word}
@@ -33,6 +36,7 @@ button.lnk.dn{color:var(--dn)}
 .card h3 a:hover{color:var(--ac);text-decoration:underline}
 .desc{color:var(--mu);font-size:.9rem;margin:4px 0}
 .info{color:var(--mu);font-size:.8rem}
+.tag{display:inline-block;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:0 8px;font-size:.78rem;color:var(--ac);margin-bottom:2px}
 .acts{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center}
 .open{background:var(--ac);color:var(--acx);text-decoration:none;border-radius:8px;padding:4px 14px;font-size:.88rem;font-weight:600}
 mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
@@ -42,6 +46,8 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
 .empty,.note{text-align:center;color:var(--mu);padding:28px 8px}
 .note{background:var(--card);border:1px dashed var(--bd);border-radius:12px;padding:10px;margin-bottom:12px;font-size:.85rem}
 .hint{font-size:.8rem;color:var(--mu)}
+.crumb{display:flex;align-items:center;gap:8px;margin:4px 0 12px;font-weight:600}
+.sec{color:var(--mu);font-size:.85rem;margin:14px 2px 8px}
 </style>
 </head>
 <body>
@@ -51,7 +57,8 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
   <div id="note" class="note" hidden></div>
 
   <div class="bar">
-    <input id="q" type="search" placeholder="ابحث بالاسم أو الوصف أو الـ ID..." autocomplete="off">
+    <input id="q" type="search" placeholder="ابحث في كل الملفات بالاسم أو الوصف أو الـ ID..." autocomplete="off">
+    <button id="addFolder">📁 مجلد جديد</button>
     <button class="pri" id="add">+ رفع ملف</button>
   </div>
 
@@ -62,15 +69,16 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
       <input id="f-title" placeholder="الاسم *">
       <input id="f-file-id" placeholder="ID (مثال: 12)">
     </div>
+    <select id="f-folder"></select>
     <textarea id="f-desc" placeholder="الوصف"></textarea>
     <div class="row"><button class="pri" id="save">حفظ</button><button id="cancel">إلغاء</button></div>
   </div>
 
+  <div id="crumb"></div>
   <div class="meta" id="count"></div>
   <div id="list"></div>
 </div>
 
-<!-- استدعاء مكتبة Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function(){
@@ -78,7 +86,7 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
   const SUPABASE_ANON_KEY = 'sb_publishable_KpMHS25xwWbUXjXCOw4MXg_HmnVTJtK';
   const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  var rows = [], editing = null, armed = null, MAX = 20 * 1024 * 1024;
+  var rows = [], folders = [], cur = null, editing = null, armed = null, MAX = 20 * 1024 * 1024;
   var $ = function(id){ return document.getElementById(id); };
 
   function norm(s){
@@ -91,75 +99,154 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
     terms.forEach(function(t){var i=0,p;while((p=n.indexOf(t,i))>-1){ranges.push([p,p+t.length]);i=p+t.length}});
     if(!ranges.length){parent.textContent=text;return}
     ranges.sort(function(a,b){return a[0]-b[0]});
-    var cur=0;
+    var c=0;
     ranges.forEach(function(r){
-      if(r[0]<cur)return;
-      parent.appendChild(document.createTextNode(text.slice(cur,r[0])));
-      var m=el("mark",null,text.slice(r[0],r[1]));parent.appendChild(m);cur=r[1];
+      if(r[0]<c)return;
+      parent.appendChild(document.createTextNode(text.slice(c,r[0])));
+      parent.appendChild(el("mark",null,text.slice(r[0],r[1])));c=r[1];
     });
-    parent.appendChild(document.createTextNode(text.slice(cur)));
+    parent.appendChild(document.createTextNode(text.slice(c)));
   }
   function size(b){return b>1048576?(b/1048576).toFixed(1)+" م.ب":Math.max(1,Math.round(b/1024))+" ك.ب"}
   function flash(m){var n=$("note");n.textContent=m;n.hidden=false}
-  
-  function getFileUrl(assetId){
-    var { data } = supabase.storage.from('assets').getPublicUrl(assetId);
-    return data.publicUrl;
-  }
+  function getFileUrl(id){return supabase.storage.from('assets').getPublicUrl(id).data.publicUrl}
   function isImg(r){return (r.content_type||"").indexOf("image/")===0}
+  function folderById(id){return folders.find(function(f){return String(f.id)===String(id)})}
+  function countIn(id){return rows.filter(function(r){return String(r.folder_id)===String(id)}).length}
 
-  async function loadRecords(){
-    var { data, error } = await supabase.from('records').select('*').order('ts', { ascending: false });
-    if(error){ flash("خطأ في تحميل البيانات: " + error.message); return; }
-    rows = data || [];
+  async function loadAll(){
+    var a = await supabase.from('records').select('*').order('ts',{ascending:false});
+    if(a.error){flash("خطأ في تحميل الملفات: "+a.error.message);return}
+    var b = await supabase.from('folders').select('*').order('name',{ascending:true});
+    if(b.error){flash("خطأ في تحميل المجلدات (تأكد إنك شغّلت الـ SQL): "+b.error.message)}
+    rows = a.data||[]; folders = b.data||[];
+    if(cur!==null && !folderById(cur)) cur=null;
     render();
+  }
+
+  function rowCard(r,terms,showFolder){
+    var c=el("div","card"),th=el("div","thumb");
+    var fileUrl=getFileUrl(r.asset_id);
+    if(isImg(r)){var im=document.createElement("img");im.loading="lazy";im.alt="";im.src=fileUrl;th.appendChild(im)}
+    else th.textContent=(r.content_type==="application/pdf")?"PDF":"ملف";
+    c.appendChild(th);
+
+    var b=el("div","body");
+    if(showFolder&&r.folder_id){var fo=folderById(r.folder_id);if(fo)b.appendChild(el("div","tag","📁 "+fo.name))}
+    var h=el("h3");
+    if(r.file_id){h.appendChild(el("span","cat","ID: "+r.file_id+" - "));h.appendChild(document.createTextNode(" "))}
+    var a=document.createElement("a");
+    a.href=fileUrl;a.target="_blank";a.rel="noopener";hl(a,r.title||"",terms);h.appendChild(a);
+    b.appendChild(h);
+    if(r.description){var d=el("div","desc");hl(d,r.description,terms);b.appendChild(d)}
+    b.appendChild(el("div","info",size(r.size||0)+" · آخر تحديث "+new Date(r.ts||Date.now()).toLocaleDateString("ar-EG")));
+
+    var ac=el("div","acts"),op=el("a","open","فتح");op.href=fileUrl;op.target="_blank";op.rel="noopener";ac.appendChild(op);
+    var e=el("button","lnk","تعديل / نقل");e.onclick=function(){openForm(r)};
+    var key="r"+r.id;
+    var x=el("button","lnk dn",armed===key?"تأكيد الحذف؟":"حذف");
+    x.onclick=function(){
+      if(armed===key){armed=null;remove(r)}
+      else{armed=key;render();setTimeout(function(){if(armed===key){armed=null;render()}},3000)}
+    };
+    ac.appendChild(e);ac.appendChild(x);
+    b.appendChild(ac);c.appendChild(b);
+    return c;
+  }
+
+  function folderCard(f){
+    var c=el("div","card folder");
+    c.appendChild(el("div","thumb fo","📁"));
+    var b=el("div","body");
+    b.appendChild(el("h3",null,f.name));
+    b.appendChild(el("div","info",countIn(f.id)+" ملف"));
+    var ac=el("div","acts");
+    var rn=el("button","lnk","إعادة تسمية");
+    rn.onclick=function(ev){ev.stopPropagation();renameFolder(f)};
+    var key="f"+f.id;
+    var x=el("button","lnk dn",armed===key?"تأكيد الحذف؟":"حذف المجلد");
+    x.onclick=function(ev){
+      ev.stopPropagation();
+      if(armed===key){armed=null;removeFolder(f)}
+      else{armed=key;render();setTimeout(function(){if(armed===key){armed=null;render()}},3000)}
+    };
+    ac.appendChild(rn);ac.appendChild(x);b.appendChild(ac);
+    c.appendChild(b);
+    c.onclick=function(){cur=f.id;$("q").value="";render()};
+    return c;
   }
 
   function render(){
     var terms=norm($("q").value).split(/\s+/).filter(Boolean);
-    var out=rows.filter(function(r){
-      var hay=norm([r.title, r.file_id, r.description, r.file_Name].join(" "));
-      return terms.every(function(t){return hay.indexOf(t)>-1});
-    });
+    var list=$("list"),crumb=$("crumb");
+    list.innerHTML="";crumb.innerHTML="";
+    var searching=terms.length>0;
 
-    $("count").textContent=out.length+" من "+rows.length+" ملف";
-    var list=$("list");list.innerHTML="";
-    if(!out.length){list.appendChild(el("div","empty",rows.length?"لا توجد نتائج مطابقة.":"لا توجد ملفات بعد."));return}
+    if(searching){
+      var out=rows.filter(function(r){
+        var fo=folderById(r.folder_id);
+        var hay=norm([r.title,r.file_id,r.description,r.file_Name,fo?fo.name:""].join(" "));
+        return terms.every(function(t){return hay.indexOf(t)>-1});
+      });
+      $("count").textContent="نتائج البحث: "+out.length+" من "+rows.length+" ملف";
+      if(!out.length)list.appendChild(el("div","empty","لا توجد نتائج مطابقة."));
+      out.forEach(function(r){list.appendChild(rowCard(r,terms,true))});
+      return;
+    }
 
-    out.forEach(function(r){
-      var c=el("div","card"),th=el("div","thumb");
-      var fileUrl = getFileUrl(r.asset_id);
-      if(isImg(r)){var im=document.createElement("img");im.loading="lazy";im.alt="";im.src=fileUrl;th.appendChild(im)}
-      else th.textContent=(r.content_type==="application/pdf")?"PDF":"ملف";
-      c.appendChild(th);
+    if(cur!==null){
+      var fo=folderById(cur);
+      var cr=el("div","crumb");
+      var back=el("button",null,"→ كل الملفات");back.onclick=function(){cur=null;render()};
+      cr.appendChild(back);cr.appendChild(el("span",null,"📁 "+(fo?fo.name:"")));
+      crumb.appendChild(cr);
+      var inF=rows.filter(function(r){return String(r.folder_id)===String(cur)});
+      $("count").textContent=inF.length+" ملف في هذا المجلد";
+      if(!inF.length)list.appendChild(el("div","empty","المجلد فاضي. اضغط \"رفع ملف\" لإضافة ملفات هنا."));
+      inF.forEach(function(r){list.appendChild(rowCard(r,terms,false))});
+      return;
+    }
 
-      var b=el("div","body"),h=el("h3");
-      if(r.file_id){
-        var fid=el("span","cat","ID: "+r.file_id+" - ");
-        h.appendChild(fid);
-        h.appendChild(document.createTextNode(" "));
-      }
-      var a=document.createElement("a");
-      a.href=fileUrl;a.target="_blank";a.rel="noopener";hl(a,r.title||"",terms);h.appendChild(a);
-      b.appendChild(h);
+    var loose=rows.filter(function(r){return !r.folder_id||!folderById(r.folder_id)});
+    $("count").textContent=folders.length+" مجلد · "+rows.length+" ملف";
+    if(folders.length){
+      list.appendChild(el("div","sec","المجلدات"));
+      folders.forEach(function(f){list.appendChild(folderCard(f))});
+    }
+    if(loose.length){
+      if(folders.length)list.appendChild(el("div","sec","ملفات بدون مجلد"));
+      loose.forEach(function(r){list.appendChild(rowCard(r,terms,false))});
+    }
+    if(!folders.length&&!loose.length)list.appendChild(el("div","empty","لا توجد ملفات أو مجلدات بعد."));
+  }
 
-      if(r.description){
-        var d=el("div","desc");hl(d,r.description,terms);b.appendChild(d);
-      }
+  async function newFolder(){
+    var name=(prompt("اسم المجلد الجديد:")||"").trim();
+    if(!name)return;
+    var r=await supabase.from('folders').insert([{name:name,ts:Date.now()}]);
+    if(r.error){flash("تعذّر إنشاء المجلد: "+r.error.message);return}
+    loadAll();
+  }
+  async function renameFolder(f){
+    var name=(prompt("الاسم الجديد:",f.name)||"").trim();
+    if(!name||name===f.name)return;
+    var r=await supabase.from('folders').update({name:name}).eq('id',f.id);
+    if(r.error){flash("تعذّرت إعادة التسمية: "+r.error.message);return}
+    loadAll();
+  }
+  async function removeFolder(f){
+    // الملفات اللي جواه مش بتتمسح، بترجع لـ "بدون مجلد"
+    var r=await supabase.from('folders').delete().eq('id',f.id);
+    if(r.error){flash("تعذّر حذف المجلد: "+r.error.message);return}
+    if(String(cur)===String(f.id))cur=null;
+    loadAll();
+  }
 
-      b.appendChild(el("div","info",size(r.size||0)+" · آخر تحديث "+new Date(r.ts||Date.now()).toLocaleDateString("ar-EG")));
-      
-      var ac=el("div","acts"),op=el("a","open","فتح");op.href=fileUrl;op.target="_blank";op.rel="noopener";ac.appendChild(op);
-      
-      var e=el("button","lnk","تعديل / تحديث الملف");e.onclick=function(){openForm(r)};
-      var x=el("button","lnk dn",armed===r.id?"تأكيد الحذف؟":"حذف");
-      x.onclick=function(){
-        if(armed===r.id){armed=null;remove(r)}
-        else{armed=r.id;render();setTimeout(function(){if(armed===r.id){armed=null;render()}},3000)}
-      };
-      ac.appendChild(e);ac.appendChild(x);
-      b.appendChild(ac);c.appendChild(b);list.appendChild(c);
-    });
+  function fillFolderSelect(selected){
+    var s=$("f-folder");s.innerHTML="";
+    var o=el("option",null,"بدون مجلد");o.value="";s.appendChild(o);
+    folders.forEach(function(f){var op=el("option",null,"📁 "+f.name);op.value=f.id;s.appendChild(op)});
+    s.value=selected==null?"":String(selected);
   }
 
   function openForm(r){
@@ -167,7 +254,8 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
     $("f-title").value=r?r.title||"":"";
     $("f-file-id").value=r?r.file_id||"":"";
     $("f-desc").value=r?r.description||"":"";
-    $("f-hint").textContent=r?"اختر ملفًا جديدًا فقط لو عايز تستبدل الحالي ("+(r.file_Name||"")+").":"PDF أو صور، حتى 20 ميجابايت.";
+    fillFolderSelect(r?r.folder_id:cur);
+    $("f-hint").textContent=r?"اختر ملفًا جديدًا فقط لو عايز تستبدل الحالي ("+(r.file_Name||")")+")":"PDF أو صور، حتى 20 ميجابايت.";
     $("form").classList.add("on");$("f-title").focus();
   }
   function closeForm(){$("form").classList.remove("on");editing=null}
@@ -178,77 +266,53 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
   };
 
   async function save(){
-    var f=$("f-file").files[0], title=$("f-title.value")||$("f-title").value.trim(), btn=$("save");
-    var titleVal = $("f-title").value.trim();
+    var f=$("f-file").files[0], btn=$("save");
+    var titleVal=$("f-title").value.trim();
     if(!titleVal){$("f-title").focus();return}
     if(!editing&&!f){flash("اختر ملفًا أولًا.");return}
     if(f&&f.size>MAX){flash("الملف أكبر من 20 ميجابايت.");return}
     btn.disabled=true;btn.textContent="جاري الحفظ…";
-
-    try {
-      var assetId = editing ? editing.asset_id : null;
-      var contentType = editing ? editing.content_type : null;
-      var sizeBytes = editing ? editing.size : null;
-      var fileName = editing ? editing.file_Name : null;
-
+    try{
+      var assetId=editing?editing.asset_id:null,contentType=editing?editing.content_type:null,
+          sizeBytes=editing?editing.size:null,fileName=editing?editing.file_Name:null;
       if(f){
-        // تنظيف شامل: إزالة أي رموز خاصة، فواصل عليا، مسافات، وتحويل الرموز غير الإنجليزية لشرطات سفلية
-        var cleanFileName = f.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        var filePath = Date.now() + '_' + cleanFileName;
-        var { error: uploadError } = await supabase.storage.from('assets').upload(filePath, f);
-        if(uploadError) throw uploadError;
-        assetId = filePath;
-        contentType = f.type;
-        sizeBytes = f.size;
-        fileName = f.name;
+        var clean=f.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+        var filePath=Date.now()+'_'+clean;
+        var up=await supabase.storage.from('assets').upload(filePath,f);
+        if(up.error)throw up.error;
+        assetId=filePath;contentType=f.type;sizeBytes=f.size;fileName=f.name;
       }
-
-      var recordData = {
-        title: titleVal,
-        file_id: $("f-file-id").value.trim(),
-        description: $("f-desc").value.trim(),
-        asset_id: assetId,
-        file_Name: fileName,
-        content_type: contentType,
-        size: sizeBytes,
-            ts: Date.now()
+      var fv=$("f-folder").value;
+      var rec={
+        title:titleVal,file_id:$("f-file-id").value.trim(),description:$("f-desc").value.trim(),
+        asset_id:assetId,file_Name:fileName,content_type:contentType,size:sizeBytes,
+        folder_id:fv===""?null:Number(fv),ts:Date.now()
       };
-
-      if(editing){
-        var { error: updateError } = await supabase.from('records').update(recordData).eq('id', editing.id);
-        if(updateError) throw updateError;
-      } else {
-        var { error: insertError } = await supabase.from('records').insert([recordData]);
-        if(insertError) throw insertError;
-      }
-
-      closeForm();
-      loadRecords();
-    } catch(e) {
+      var res=editing?await supabase.from('records').update(rec).eq('id',editing.id)
+                     :await supabase.from('records').insert([rec]);
+      if(res.error)throw res.error;
+      closeForm();loadAll();
+    }catch(e){
       flash("تعذّر الحفظ: "+(e.message||"حاول مرة أخرى"));
-    } finally {
+    }finally{
       btn.disabled=false;btn.textContent="حفظ";
     }
   }
 
   async function remove(r){
-    try {
-      var { error } = await supabase.from('records').delete().eq('id', r.id);
-      if(error) throw error;
-      if(r.asset_id){
-        await supabase.storage.from('assets').remove([r.asset_id]);
-      }
-      loadRecords();
-    } catch(e) {
-      flash("تعذّر الحذف: "+(e.message||""));
-    }
+    try{
+      var d=await supabase.from('records').delete().eq('id',r.id);
+      if(d.error)throw d.error;
+      if(r.asset_id)await supabase.storage.from('assets').remove([r.asset_id]);
+      loadAll();
+    }catch(e){flash("تعذّر الحذف: "+(e.message||""))}
   }
 
   $("add").onclick=function(){openForm(null)};
+  $("addFolder").onclick=newFolder;
   $("cancel").onclick=closeForm;$("save").onclick=save;
   $("q").oninput=render;
-
-  loadRecords();
+  loadAll();
 })();
 </script>
 </body>
