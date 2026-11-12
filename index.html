@@ -46,7 +46,10 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
 .empty,.note{text-align:center;color:var(--mu);padding:28px 8px}
 .note{background:var(--card);border:1px dashed var(--bd);border-radius:12px;padding:10px;margin-bottom:12px;font-size:.85rem}
 .hint{font-size:.8rem;color:var(--mu)}
-.crumb{display:flex;align-items:center;gap:8px;margin:4px 0 12px;font-weight:600}
+.crumb{display:flex;align-items:center;gap:6px;margin:4px 0 12px;flex-wrap:wrap}
+.crumb button{padding:4px 10px;font-size:.9rem}
+.crumb .sep{color:var(--mu)}
+.crumb .here{font-weight:700}
 .sec{color:var(--mu);font-size:.85rem;margin:14px 2px 8px}
 </style>
 </head>
@@ -62,6 +65,7 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
     <button class="pri" id="add">+ رفع ملف</button>
   </div>
 
+  <!-- فورم الملف -->
   <div class="card form" id="form">
     <input id="f-file" type="file" accept="application/pdf,image/*">
     <div class="hint" id="f-hint">PDF أو صور، حتى 20 ميجابايت.</div>
@@ -72,6 +76,15 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
     <select id="f-folder"></select>
     <textarea id="f-desc" placeholder="الوصف"></textarea>
     <div class="row"><button class="pri" id="save">حفظ</button><button id="cancel">إلغاء</button></div>
+  </div>
+
+  <!-- فورم المجلد (إنشاء / إعادة تسمية / نقل) -->
+  <div class="card form" id="fform">
+    <div class="hint" id="ff-hint">مجلد جديد</div>
+    <input id="ff-name" placeholder="اسم المجلد *">
+    <div class="hint">المجلد الأب (مكان المجلد):</div>
+    <select id="ff-parent"></select>
+    <div class="row"><button class="pri" id="ff-save">حفظ</button><button id="ff-cancel">إلغاء</button></div>
   </div>
 
   <div id="crumb"></div>
@@ -86,7 +99,7 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
   const SUPABASE_ANON_KEY = 'sb_publishable_KpMHS25xwWbUXjXCOw4MXg_HmnVTJtK';
   const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  var rows = [], folders = [], cur = null, editing = null, armed = null, MAX = 20 * 1024 * 1024;
+  var rows = [], folders = [], cur = null, editing = null, editingFolder = null, armed = null, MAX = 20 * 1024 * 1024;
   var $ = function(id){ return document.getElementById(id); };
 
   function norm(s){
@@ -111,8 +124,41 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
   function flash(m){var n=$("note");n.textContent=m;n.hidden=false}
   function getFileUrl(id){return supabase.storage.from('assets').getPublicUrl(id).data.publicUrl}
   function isImg(r){return (r.content_type||"").indexOf("image/")===0}
-  function folderById(id){return folders.find(function(f){return String(f.id)===String(id)})}
-  function countIn(id){return rows.filter(function(r){return String(r.folder_id)===String(id)}).length}
+  function folderById(id){
+    if(id===null||id===undefined||id==="")return undefined;
+    return folders.find(function(f){return String(f.id)===String(id)});
+  }
+
+  /* ===== دوال الشجرة ===== */
+  // المسار من الجذر لحد المجلد (مصفوفة مجلدات)، مع حماية من الحلقات
+  function pathOf(id){
+    var out=[],seen={},f=folderById(id);
+    while(f&&!seen[f.id]){seen[f.id]=1;out.unshift(f);f=folderById(f.parent_id)}
+    return out;
+  }
+  function pathName(id){return pathOf(id).map(function(f){return f.name}).join(" / ")}
+  // هل المجلد id هو نفسه ancestorId أو من أحفاده؟
+  function isInside(id,ancestorId){
+    return pathOf(id).some(function(f){return String(f.id)===String(ancestorId)});
+  }
+  function childFolders(id){
+    return folders.filter(function(f){
+      if(id===null)return !f.parent_id||!folderById(f.parent_id);
+      return String(f.parent_id)===String(id);
+    });
+  }
+  function filesIn(id){
+    return rows.filter(function(r){
+      if(id===null)return !r.folder_id||!folderById(r.folder_id);
+      return String(r.folder_id)===String(id);
+    });
+  }
+  // عدد الملفات داخل المجلد وكل مجلداته الفرعية
+  function deepCount(id){
+    var n=filesIn(id).length;
+    childFolders(id).forEach(function(c){n+=deepCount(c.id)});
+    return n;
+  }
 
   async function loadAll(){
     var a = await supabase.from('records').select('*').order('ts',{ascending:false});
@@ -132,7 +178,7 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
     c.appendChild(th);
 
     var b=el("div","body");
-    if(showFolder&&r.folder_id){var fo=folderById(r.folder_id);if(fo)b.appendChild(el("div","tag","📁 "+fo.name))}
+    if(showFolder&&r.folder_id&&folderById(r.folder_id)){b.appendChild(el("div","tag","📁 "+pathName(r.folder_id)))}
     var h=el("h3");
     if(r.file_id){h.appendChild(el("span","cat","ID: "+r.file_id+" - "));h.appendChild(document.createTextNode(" "))}
     var a=document.createElement("a");
@@ -159,10 +205,15 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
     c.appendChild(el("div","thumb fo","📁"));
     var b=el("div","body");
     b.appendChild(el("h3",null,f.name));
-    b.appendChild(el("div","info",countIn(f.id)+" ملف"));
+    var subs=childFolders(f.id).length, direct=filesIn(f.id).length, deep=deepCount(f.id);
+    var info=[];
+    if(subs)info.push(subs+" مجلد");
+    info.push(direct+" ملف");
+    if(deep!==direct)info.push("(الإجمالي "+deep+")");
+    b.appendChild(el("div","info",info.join(" · ")));
     var ac=el("div","acts");
-    var rn=el("button","lnk","إعادة تسمية");
-    rn.onclick=function(ev){ev.stopPropagation();renameFolder(f)};
+    var rn=el("button","lnk","إعادة تسمية / نقل");
+    rn.onclick=function(ev){ev.stopPropagation();openFolderForm(f)};
     var key="f"+f.id;
     var x=el("button","lnk dn",armed===key?"تأكيد الحذف؟":"حذف المجلد");
     x.onclick=function(ev){
@@ -176,16 +227,30 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
     return c;
   }
 
+  function renderCrumb(){
+    var crumb=$("crumb");crumb.innerHTML="";
+    if(cur===null)return;
+    var cr=el("div","crumb");
+    var root=el("button",null,"🏠 الرئيسية");root.onclick=function(){cur=null;render()};
+    cr.appendChild(root);
+    var p=pathOf(cur);
+    p.forEach(function(f,i){
+      cr.appendChild(el("span","sep","›"));
+      if(i===p.length-1){cr.appendChild(el("span","here","📁 "+f.name))}
+      else{var bt=el("button",null,"📁 "+f.name);bt.onclick=function(){cur=f.id;render()};cr.appendChild(bt)}
+    });
+    crumb.appendChild(cr);
+  }
+
   function render(){
     var terms=norm($("q").value).split(/\s+/).filter(Boolean);
-    var list=$("list"),crumb=$("crumb");
-    list.innerHTML="";crumb.innerHTML="";
+    var list=$("list");
+    list.innerHTML="";$("crumb").innerHTML="";
     var searching=terms.length>0;
 
     if(searching){
       var out=rows.filter(function(r){
-        var fo=folderById(r.folder_id);
-        var hay=norm([r.title,r.file_id,r.description,r.file_Name,fo?fo.name:""].join(" "));
+        var hay=norm([r.title,r.file_id,r.description,r.file_Name,pathName(r.folder_id)].join(" "));
         return terms.every(function(t){return hay.indexOf(t)>-1});
       });
       $("count").textContent="نتائج البحث: "+out.length+" من "+rows.length+" ملف";
@@ -194,59 +259,87 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
       return;
     }
 
+    renderCrumb();
+    var subs=childFolders(cur), files=filesIn(cur);
+
     if(cur!==null){
-      var fo=folderById(cur);
-      var cr=el("div","crumb");
-      var back=el("button",null,"→ كل الملفات");back.onclick=function(){cur=null;render()};
-      cr.appendChild(back);cr.appendChild(el("span",null,"📁 "+(fo?fo.name:"")));
-      crumb.appendChild(cr);
-      var inF=rows.filter(function(r){return String(r.folder_id)===String(cur)});
-      $("count").textContent=inF.length+" ملف في هذا المجلد";
-      if(!inF.length)list.appendChild(el("div","empty","المجلد فاضي. اضغط \"رفع ملف\" لإضافة ملفات هنا."));
-      inF.forEach(function(r){list.appendChild(rowCard(r,terms,false))});
-      return;
+      $("count").textContent=subs.length+" مجلد · "+files.length+" ملف في هذا المجلد";
+    }else{
+      $("count").textContent=folders.length+" مجلد · "+rows.length+" ملف";
     }
 
-    var loose=rows.filter(function(r){return !r.folder_id||!folderById(r.folder_id)});
-    $("count").textContent=folders.length+" مجلد · "+rows.length+" ملف";
-    if(folders.length){
-      list.appendChild(el("div","sec","المجلدات"));
-      folders.forEach(function(f){list.appendChild(folderCard(f))});
+    if(subs.length){
+      list.appendChild(el("div","sec",cur===null?"المجلدات":"المجلدات الفرعية"));
+      subs.forEach(function(f){list.appendChild(folderCard(f))});
     }
-    if(loose.length){
-      if(folders.length)list.appendChild(el("div","sec","ملفات بدون مجلد"));
-      loose.forEach(function(r){list.appendChild(rowCard(r,terms,false))});
+    if(files.length){
+      if(subs.length)list.appendChild(el("div","sec",cur===null?"ملفات بدون مجلد":"الملفات"));
+      files.forEach(function(r){list.appendChild(rowCard(r,terms,false))});
     }
-    if(!folders.length&&!loose.length)list.appendChild(el("div","empty","لا توجد ملفات أو مجلدات بعد."));
+    if(!subs.length&&!files.length){
+      list.appendChild(el("div","empty",cur===null?"لا توجد ملفات أو مجلدات بعد.":"المجلد فاضي. اضغط \"رفع ملف\" أو \"مجلد جديد\" للإضافة هنا."));
+    }
   }
 
-  async function newFolder(){
-    var name=(prompt("اسم المجلد الجديد:")||"").trim();
-    if(!name)return;
-    var r=await supabase.from('folders').insert([{name:name,ts:Date.now()}]);
-    if(r.error){flash("تعذّر إنشاء المجلد: "+r.error.message);return}
-    loadAll();
+  /* ===== المجلدات ===== */
+  // يملا قائمة اختيار المجلد الأب. excludeId = المجلد الجاري تعديله (مع أحفاده يتم استبعادهم)
+  function fillParentSelect(sel,selected,excludeId,rootLabel){
+    sel.innerHTML="";
+    var o=el("option",null,rootLabel);o.value="";sel.appendChild(o);
+    folders
+      .filter(function(f){return excludeId==null||!isInside(f.id,excludeId)})
+      .map(function(f){return {id:f.id,name:pathName(f.id)}})
+      .sort(function(a,b){return a.name.localeCompare(b.name,"ar")})
+      .forEach(function(f){var op=el("option",null,"📁 "+f.name);op.value=f.id;sel.appendChild(op)});
+    sel.value=selected==null?"":String(selected);
   }
-  async function renameFolder(f){
-    var name=(prompt("الاسم الجديد:",f.name)||"").trim();
-    if(!name||name===f.name)return;
-    var r=await supabase.from('folders').update({name:name}).eq('id',f.id);
-    if(r.error){flash("تعذّرت إعادة التسمية: "+r.error.message);return}
-    loadAll();
+
+  function openFolderForm(f){
+    editingFolder=f||null;
+    $("ff-hint").textContent=f?"تعديل المجلد: "+f.name:"مجلد جديد";
+    $("ff-name").value=f?f.name:"";
+    fillParentSelect($("ff-parent"),f?f.parent_id:cur,f?f.id:null,"الرئيسية (بدون مجلد أب)");
+    $("fform").classList.add("on");$("ff-name").focus();
   }
+  function closeFolderForm(){$("fform").classList.remove("on");editingFolder=null}
+
+  async function saveFolder(){
+    var name=$("ff-name").value.trim();
+    if(!name){$("ff-name").focus();return}
+    var pv=$("ff-parent").value, parentId=pv===""?null:Number(pv);
+    var btn=$("ff-save");btn.disabled=true;
+    try{
+      var r;
+      if(editingFolder){
+        if(parentId!==null&&isInside(parentId,editingFolder.id))throw new Error("مينفعش تنقل المجلد جوا نفسه.");
+        r=await supabase.from('folders').update({name:name,parent_id:parentId}).eq('id',editingFolder.id);
+      }else{
+        r=await supabase.from('folders').insert([{name:name,parent_id:parentId,ts:Date.now()}]);
+      }
+      if(r.error)throw r.error;
+      closeFolderForm();loadAll();
+    }catch(e){flash("تعذّر حفظ المجلد: "+(e.message||"حاول مرة أخرى"))}
+    finally{btn.disabled=false}
+  }
+
   async function removeFolder(f){
-    // الملفات اللي جواه مش بتتمسح، بترجع لـ "بدون مجلد"
-    var r=await supabase.from('folders').delete().eq('id',f.id);
-    if(r.error){flash("تعذّر حذف المجلد: "+r.error.message);return}
-    if(String(cur)===String(f.id))cur=null;
-    loadAll();
+    // محتويات المجلد (ملفات + مجلدات فرعية) بتتنقل للمجلد الأب، مفيش حاجة بتتمسح
+    try{
+      var up=f.parent_id||null;
+      var a=await supabase.from('folders').update({parent_id:up}).eq('parent_id',f.id);
+      if(a.error)throw a.error;
+      var b=await supabase.from('records').update({folder_id:up}).eq('folder_id',f.id);
+      if(b.error)throw b.error;
+      var r=await supabase.from('folders').delete().eq('id',f.id);
+      if(r.error)throw r.error;
+      if(cur!==null&&String(cur)===String(f.id))cur=up;
+      loadAll();
+    }catch(e){flash("تعذّر حذف المجلد: "+(e.message||""))}
   }
 
+  /* ===== الملفات ===== */
   function fillFolderSelect(selected){
-    var s=$("f-folder");s.innerHTML="";
-    var o=el("option",null,"بدون مجلد");o.value="";s.appendChild(o);
-    folders.forEach(function(f){var op=el("option",null,"📁 "+f.name);op.value=f.id;s.appendChild(op)});
-    s.value=selected==null?"":String(selected);
+    fillParentSelect($("f-folder"),selected,null,"بدون مجلد");
   }
 
   function openForm(r){
@@ -255,7 +348,7 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
     $("f-file-id").value=r?r.file_id||"":"";
     $("f-desc").value=r?r.description||"":"";
     fillFolderSelect(r?r.folder_id:cur);
-    $("f-hint").textContent=r?"اختر ملفًا جديدًا فقط لو عايز تستبدل الحالي ("+(r.file_Name||")")+")":"PDF أو صور، حتى 20 ميجابايت.";
+    $("f-hint").textContent=r?"اختر ملفًا جديدًا فقط لو عايز تستبدل الحالي ("+(r.file_Name||"")+")":"PDF أو صور، حتى 20 ميجابايت.";
     $("form").classList.add("on");$("f-title").focus();
   }
   function closeForm(){$("form").classList.remove("on");editing=null}
@@ -309,8 +402,9 @@ mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
   }
 
   $("add").onclick=function(){openForm(null)};
-  $("addFolder").onclick=newFolder;
+  $("addFolder").onclick=function(){openFolderForm(null)};
   $("cancel").onclick=closeForm;$("save").onclick=save;
+  $("ff-cancel").onclick=closeFolderForm;$("ff-save").onclick=saveFolder;
   $("q").oninput=render;
   loadAll();
 })();
